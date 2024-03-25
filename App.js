@@ -1,140 +1,135 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, Dimensions, ScrollView, TouchableOpacity, Image, Text, Animated } from 'react-native';
-import Svg, { Path, G, Circle as SvgCircle } from 'react-native-svg';
+import React, { useState, useMemo } from "react";
+import { Canvas, Line, Path, Skia } from "@shopify/react-native-skia";
+import { curveBasis, line, scaleLinear } from "d3";
+import { View, StyleSheet, ScrollView } from "react-native";
 import LinearGradient from 'react-native-linear-gradient';
 
-const { height, width } = Dimensions.get('window');
-
-const WindingRoad = ({ currentPosition }) => {
-  const controlPoint1X = width / 1.6 - 160;
-  const controlPoint2X = width / 1.6 + 160;
-  const roadWidth = 82;
-  const heightStroke = height * 2;
-
-  const circlePositions = [];
-  for (let i = 0; i < 10; i++) {
-    const x = width / 6 + (i * (width / 1.6 - width / 6) / 9);
-    const y = ((x - width / 6) * ((height / 2 - height / 4) / (width / 1.6 - width / 6)) + height / 24) * 4;
-    circlePositions.push({ x, y });
-  }
-
-  return (
-    <Svg height={heightStroke} width={width}>
-      <Path
-        fill="none"
-        stroke="#D9D9D9"
-        strokeWidth={roadWidth}
-        strokeOpacity={0.9}
-        d={`
-          M${width / 6} 0 
-          Q ${controlPoint1X} ${height / 4} ${width / 1.6} ${height / 2} 
-          Q ${controlPoint2X} ${height * 0.75} ${width / 1.6} ${height}
-          Q ${controlPoint1X} ${height * 1.25} ${width / 1.6} ${height * 1.5}
-          Q ${controlPoint2X} ${height * 1.75} ${width / 1.6} ${height * 2}
-        `}
-      />
-      {/* Render circles based on currentPosition */}
-      {circlePositions.map((circle, index) => (
-        <Circle key={index} position={circle} currentPosition={currentPosition} index={index} />
-      ))}
-    </Svg>
-  );
-};
-
-const Circle = ({ position, currentPosition, index }) => {
-  const isSelected = currentPosition === index + 1;
-  const scaleValue = 1;
-
-  return (
-    <SvgCircle
-      cx={position.x}
-      cy={position.y}
-      r={30}
-      fill={isSelected ? '#3796FF' : '#fff'}
-      scale={scaleValue}
-    />
-  );
-};
-
-const Panda = ({ currentPosition }) => {
-  const circlePositions = [];
-  for (let i = 0; i < 10; i++) {
-    const x = width / 6 + (i * (width / 1.6 - width / 6) / 9);
-    const y = ((x - width / 6) * ((height / 2 - height / 4) / (width / 1.6 - width / 6)) + height / 24) * 4;
-    circlePositions.push({ x, y });
-  }
-
-  const positionX = circlePositions[currentPosition - 1].x;
-  const positionY = circlePositions[currentPosition - 1].y;
-
-  return (
-    <Image
-      source={require('./src/images/panda.png')}
-      style={[
-        styles.panda,
-        { left: positionX - 20, top: positionY + 12 },
-      ]}
-    />
-  );
-};
+const originalData = [
+  { level: 0, value: 0 },
+  { level: 1, value: 300 },
+  { level: 2, value: 1500.35 },
+  { level: 3, value: 150.84 },
+  { level: 4, value: 800.92 },
+  { level: 5, value: 200.8 },
+  { level: 6, value: 150.47 },
+  { level: 7, value: 1000.47 },
+  { level: 8, value: 200.47 },
+  { level: 9, value: 1500.47 },
+  { level: 10, value: 83.8 },
+  { level: 11, value: 100.47 },
+  { level: 12, value: 1000.47 },
+  { level: 13, value: 200.47 },
+  { level: 14, value: 1500.47 },
+  { level: 15, value: 20.47 },
+  { level: 16, value: 500 },
+  { level: 17, value: 1200 },
+  { level: 18, value: 200 },
+  { level: 19, value: 300 },
+];
 
 const App = () => {
-  const [selectedStep, setSelectedStep] = useState(1);
+  const [transition, setTransition] = useState(1);
+  const [state, setState] = useState({
+    current: 0,
+    next: 1,
+  });
 
-  const moveToNextCircle = () => {
-    let nextStep = selectedStep + 1;
-    if (nextStep > 10) {
-      nextStep = 1;
-    }
-    setSelectedStep(nextStep);
+  const GRAPH_HEIGHT = 2500;
+  const GRAPH_WIDTH = 500;
+
+  const makeGraph = (data) => {
+    const max = Math.max(...data.map((val) => val.value));
+    const min = Math.min(...data.map((val) => val.value));
+
+    const x = scaleLinear().domain([0, max]).range([10, GRAPH_WIDTH - 10]);
+
+    const y = scaleLinear()
+      .domain([1, 18])
+      .range([GRAPH_HEIGHT, 80]);
+
+    const curvedLine = line()
+      .x((d) => x(d.value))
+      .y((d) => y(d.level))
+      .curve(curveBasis)(data);
+
+    const skPath = curvedLine ? Skia.Path.MakeFromSVGString(curvedLine) : null;
+
+    return {
+      max,
+      min,
+      curve: skPath || null,
+    };
   };
 
+  const graphData = [makeGraph(originalData), makeGraph(originalData)];
+
+  const path = useMemo(() => {
+    const start = graphData[state.current].curve;
+    const end = graphData[state.next].curve;
+    const result = start.interpolate(end, transition);
+    return result?.toSVGString() ?? "0";
+  }, [state, transition, graphData]);
+
+  // Define outer path with a smaller strokeWidth and a different color
+  const outerPath = useMemo(() => {
+    const start = graphData[state.current].curve;
+    const end = graphData[state.next].curve;
+    const result = start.interpolate(end, transition);
+    return result?.toSVGString() ?? "0";
+  }, [state, transition, graphData]);
+
+  // Create shadow effect by drawing multiple paths with slight offsets and decreasing opacity
+  // const shadowPaths = useMemo(() => {
+  //   const NUM_SHADOWS = 5;
+  //   const offset = 5;
+  //   const opacityStep = 1 / NUM_SHADOWS;
+  //   const paths = [];
+
+  //   for (let i = 1; i <= NUM_SHADOWS; i++) {
+  //     const shadowOpacity = 1 - opacityStep * i;
+  //     const shadowOffset = offset * i;
+  //     const shadowPath = path.replace(/d="([^"]*)"/, `d="$1" stroke-opacity="${shadowOpacity}"`);
+  //     paths.push(<Path key={i} style="stroke" path={shadowPath} strokeWidth={90} color="#000" />);
+  //   }
+
+  //   return paths;
+  // }, [path]);
+
   return (
-    <LinearGradient
-      colors={['#3796FF', '#a7d1ff']}
-      style={styles.container}
-      start={{ x: 0, y: 1 }}
-      end={{ x: 0, y: 0 }}
-    >
-      <ScrollView>
-        <View style={styles.content}>
-          <TouchableOpacity style={styles.button} onPress={moveToNextCircle}>
-            <Text style={styles.buttonText}>Next Circle</Text>
-          </TouchableOpacity>
-          <WindingRoad currentPosition={selectedStep} />
-          <Panda currentPosition={selectedStep} />
-        </View>
-      </ScrollView>
-    </LinearGradient>
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#3796FF', '#a7d1ff']}
+        style={styles.container}
+        start={{ x: 0, y: 1 }}
+        end={{ x: 0, y: 0 }}
+      >
+        <ScrollView>
+          <Canvas
+            style={{
+              width: GRAPH_WIDTH,
+              height: GRAPH_HEIGHT,
+            }}
+          >
+            {/* Outer path with a smaller strokeWidth and different color */}
+            {/* <Path style="stroke" path={outerPath} strokeWidth={100} color="#FFFF00" /> */}
+
+            {/* Render shadow paths */}
+            {/* {shadowPaths} */}
+
+            {/* Inner path */}
+            <Path style="stroke" path={path} strokeWidth={84} color="#D9D9D9" />
+          </Canvas>
+        </ScrollView>
+      </LinearGradient>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    alignItems: "center",
+    backgroundColor: "white",
     flex: 1,
-  },
-  content: {
-    minHeight: height * 2,
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  panda: {
-    position: 'absolute',
-    width: 60,
-    height: 60,
-    resizeMode: 'contain',
-  },
-  button: {
-    marginTop: 20,
-    padding: 10,
-    backgroundColor: '#fff',
-    borderRadius: 5,
-  },
-  buttonText: {
-    color: '#3796FF',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
 });
 
